@@ -1,0 +1,126 @@
+#!/usr/bin/bash
+#!/usr/bin/ksh
+
+Tablename=$1
+
+
+
+
+echo "$Tablename"
+INCDATE=`date +%d-%b-%Y`
+echo "$INCDATE"
+Target=/home/oracle/Desktop/output_$$.csv
+SelectAuditDate=/home/oracle/Desktop/Audit_$$.csv
+Businessdate=/home/oracle/Desktop/BusinessDate_$$.csv
+ENDDATE=`date +%d-%b-%Y`
+path=/home/oracle/Desktop/
+LOAD_SQL_FILE=/home/oracle/Desktop/fileload.input
+updatesql=/home/oracle/Desktop/update_query_$$.sql
+
+# File Wait validation
+
+path=/home/oracle/Desktop
+cd $path
+
+echo "path is Employee_Audit_`date +%d-%b-%Y`"
+
+if [[ -f "Employee_Audit_`date +%d-%b-%Y`" ]]; then
+
+	echo "File is alread exists Hence Exit from script"
+	exit
+     else 
+         echo "Creating empty fle"
+	  touch -a Employee_Audit_`date +%d-%b-%Y`
+	echo "  Employee_Audit_`date +%d-%b-%Y`  File has been created"
+ fi
+	 
+# ETL Audit table loading
+
+sqlplus -S sh/sh@orcl <<EOF
+
+SPOOL $Businessdate
+set heading off;
+select max(end_date)from SQOOP_Audit;
+SPOOL OFF
+
+EXIT
+
+EOF
+
+
+filecount=`cat $Businessdate | tr -d " \t\n\r" | wc -l`
+echo "$filecount"
+
+if [[ $filecount == 0 ]];then
+echo "File is empty, Appending default date"
+	echo '31-DEC-1980'>>$Businessdate
+
+echo "Default date appended"
+fi
+
+var_Business_date=`cat $Businessdate|tr -d " \t\n\r"`
+
+echo "Audit Date is : $var_Business_date"
+StartDate=$var_Business_date
+#StartDate1='1980-12-31 00:00:00'
+
+v_load_sql_file_select=$LOAD_SQL_FILE"_select_"$$.sql
+echo "INSERT into SQOOP_Audit values('$StartDate','$ENDDATE','$Tablename','RUNNING');">$v_load_sql_file_select
+
+executeinora()
+{
+
+sqlplus -S sh/sh@orcl <<EOF
+
+SPOOL $Target
+@$1
+SPOOL OFF
+
+EXIT;
+
+EOF
+}
+
+executeinora $v_load_sql_file_select 
+
+
+if [[ -f "Employee_Audit_`date +%d-%b-%Y`" ]]; then
+
+	echo " Removing file Employee_Audit_`date +%d-%b-%Y`"
+	rm -f Employee_Audit_`date +%d-%b-%Y`
+	echo "  Removed file Employee_Audit_`date +%d-%b-%Y`"
+fi
+
+#Creating tmp table for staging
+
+hadoop fs -test -d /user/hdfs/ora_product
+if [ $? == 0 ]; then echo "Staging /user/hdfs/ora_product  Exists"
+	echo "Removng Staging /user/hdfs/ora_product"
+
+	hadoop fs -rm -r /user/hdfs/ora_product
+	
+fi
+
+sqoop import \
+--connect jdbc:oracle:thin:@localhost:1521/orcl \
+--username sh  --password sh  \
+--query 'select * from PRODUCTS where PROD_EFF_FROM >= '\'$StartDate\'' and $CONDITIONS ' \
+--split-by PROD_CATEGORY \
+--hive-import --hive-table default.PRODUCTS \
+--target-dir /user/hdfs/ora_product
+
+echo "Updating Run Details"
+
+sqlplus -S sh/sh@orcl <<EOF
+
+update sh.SQOOP_Audit set status = 'Comleted' 
+where Job_Name='product' and trunc(start_date) = trunc(sysdate);
+
+commit;
+
+exit;
+EOF
+
+
+
+echo "Script done"
