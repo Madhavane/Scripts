@@ -1,0 +1,34 @@
+select date_trunc('hour', start_time), hour(start_time), avg(avg_running)
+from table(information_schema.warehouse_load_history(date_range_start=>dateadd('day',-1,current_timestamp())))
+group by date_trunc('hour', start_time), hour(start_time)
+order by date_trunc('hour', start_time) asc;
+
+with cte as (
+  select date_trunc('hour', start_time) as start_time, end_time, warehouse_name, credits_used
+  from table(information_schema.warehouse_metering_history(dateadd('days',-1,current_date()),current_date()))
+  where warehouse_name = 'XSMALL')
+select date_trunc('hour', a.start_time) as start_time, avg(AVG_RUNNING), avg(credits_used), avg(AVG_RUNNING) / avg(credits_used) * 100 
+from table(information_schema.warehouse_load_history(dateadd('days',-1,current_date()),current_date())) a
+join cte b on a.start_time = date_trunc('hour', a.start_time)
+where a.warehouse_name = 'XSMALL'
+group by 1
+order by 1;
+
+select * from table(information_schema.warehouse_load_history(date_range_start=>dateadd('hour',-1,current_timestamp())));
+
+select * from table(information_schema.warehouse_metering_history(dateadd('hour',-1,current_date()),current_date()));
+
+select system$pipe_status('mydb.myschema.mypipe');
+
+
+
+DATABASE_STORAGE_USAGE_HISTORY (function)
+STAGE_STORAGE_USAGE_HISTORY (function)
+TABLE_STORAGE_METRICS (view)
+
+select * from
+table(sales.information_schema.database_storage_usage_history(dateadd('days',-10,current_date()),current_date(), ‘SALES’));
+
+select *
+from table(information_schema.query_history(dateadd('hours',-1, current_timestamp()),current_timestamp()))
+order by start_time;
